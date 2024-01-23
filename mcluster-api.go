@@ -44,6 +44,32 @@ func createCluster(clusterName string, workers int) (string, error) {
 	return fmt.Sprintf("Cluster '%s' created successfully", clusterName), nil
 }
 
+func deleteCluster(clusterName string) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Check if the cluster exists
+	if _, exists := clusters[clusterName]; !exists {
+		return "", fmt.Errorf("Cluster '%s' does not exist", clusterName)
+	}
+
+	// Delete the cluster using 'kind delete cluster' command
+	args := []string{"delete", "cluster", "--name", clusterName}
+	cmd := exec.Command("kind", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("Error deleting cluster '%s': %v", clusterName, err)
+	}
+
+	// Remove the cluster from the internal data structure
+	delete(clusters, clusterName)
+
+	return fmt.Sprintf("Cluster '%s' deleted successfully", clusterName), nil
+}
+
 func abortIfExists(clusterName string, w http.ResponseWriter) {
 	if _, exists := clusters[clusterName]; exists {
 		abort(w, 409, "cluster already exists")
@@ -74,6 +100,7 @@ func (c *Cluster) Get(w http.ResponseWriter, r *http.Request) {
 		abort(w, 404, "cluster does not exist")
 	}
 }
+
 func (c *Cluster) Put(w http.ResponseWriter, r *http.Request) {
 	clusterName := mux.Vars(r)["cluster_name"]
 	abortIfExists(clusterName, w)
@@ -101,13 +128,14 @@ func (c *Cluster) Put(w http.ResponseWriter, r *http.Request) {
 
 func (c *Cluster) Delete(w http.ResponseWriter, r *http.Request) {
 	clusterName := mux.Vars(r)["cluster_name"]
-	mu.Lock()
-	defer mu.Unlock()
+	response, err := deleteCluster(clusterName)
 
-	abortNonExisting(clusterName, w)
+	if err != nil {
+		abort(w, 404, err.Error())
+		return
+	}
 
-	delete(clusters, clusterName)
-	w.WriteHeader(http.StatusNoContent)
+	json.NewEncoder(w).Encode(response)
 }
 
 func main() {
