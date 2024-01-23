@@ -7,15 +7,23 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
+	"sync"
 
 	"github.com/gorilla/mux"
 )
 
 var clusters = make(map[string]map[string]interface{})
-var clusterID = 0
+var mu sync.Mutex
 
 func createCluster(clusterName string, workers int) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Check if cluster already exists
+	if _, exists := clusters[clusterName]; exists {
+		return "", fmt.Errorf("Cluster '%s' already exists", clusterName)
+	}
+
 	args := []string{"create", "cluster", "--name", clusterName}
 
 	cmd := exec.Command("kind", args...)
@@ -25,6 +33,12 @@ func createCluster(clusterName string, workers int) (string, error) {
 	err := cmd.Run()
 	if err != nil {
 		return "", fmt.Errorf("Error creating cluster: %v", err)
+	}
+
+	clusters[clusterName] = map[string]interface{}{
+		"name": clusterName,
+		"node": workers,
+		// Add other properties as needed
 	}
 
 	return fmt.Sprintf("Cluster '%s' created successfully", clusterName), nil
@@ -51,13 +65,15 @@ type Cluster struct{}
 
 func (c *Cluster) Get(w http.ResponseWriter, r *http.Request) {
 	clusterName := mux.Vars(r)["cluster_name"]
+	mu.Lock()
+	defer mu.Unlock()
+
 	if cluster, exists := clusters[clusterName]; exists {
 		json.NewEncoder(w).Encode(cluster)
 	} else {
 		abort(w, 404, "cluster does not exist")
 	}
 }
-
 func (c *Cluster) Put(w http.ResponseWriter, r *http.Request) {
 	clusterName := mux.Vars(r)["cluster_name"]
 	abortIfExists(clusterName, w)
@@ -73,12 +89,6 @@ func (c *Cluster) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	workerNodeCount := args.Node
-	for workerNodeCount > 0 {
-		workerNodeCount--
-		fmt.Println(workerNodeCount)
-	}
-
 	// Create the cluster now and insert into the database...
 	consoleLog, err := createCluster(clusterName, args.Node)
 	if err != nil {
@@ -86,26 +96,17 @@ func (c *Cluster) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clusterID++
-	clusters[strconv.Itoa(clusterID)] = map[string]interface{}{
-		"name": args.Name,
-		"node": args.Node,
-		"type": args.Type,
-	}
-	fmt.Println(clusters)
 	json.NewEncoder(w).Encode(consoleLog)
 }
 
 func (c *Cluster) Delete(w http.ResponseWriter, r *http.Request) {
 	clusterName := mux.Vars(r)["cluster_name"]
+	mu.Lock()
+	defer mu.Unlock()
+
 	abortNonExisting(clusterName, w)
 
-	for key, cluster := range clusters {
-		if cluster["name"].(string) == clusterName {
-			delete(clusters, key)
-			break
-		}
-	}
+	delete(clusters, clusterName)
 	w.WriteHeader(http.StatusNoContent)
 }
 
