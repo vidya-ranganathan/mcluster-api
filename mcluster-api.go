@@ -17,15 +17,17 @@ var mu sync.Mutex
 
 func createCluster(clusterName string, workers int) (string, error) {
 	mu.Lock()
-	defer mu.Unlock()
-
-	// Check if cluster already exists
 	if _, exists := clusters[clusterName]; exists {
+		mu.Unlock()
 		return "", fmt.Errorf("Cluster '%s' already exists", clusterName)
 	}
+	clusters[clusterName] = map[string]interface{}{
+		"name": clusterName,
+		"node": workers,
+	}
+	mu.Unlock()
 
 	args := []string{"create", "cluster", "--name", clusterName}
-
 	cmd := exec.Command("kind", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -35,25 +37,18 @@ func createCluster(clusterName string, workers int) (string, error) {
 		return "", fmt.Errorf("Error creating cluster: %v", err)
 	}
 
-	clusters[clusterName] = map[string]interface{}{
-		"name": clusterName,
-		"node": workers,
-		// Add other properties as needed
-	}
-
 	return fmt.Sprintf("Cluster '%s' created successfully", clusterName), nil
 }
 
 func deleteCluster(clusterName string) (string, error) {
 	mu.Lock()
-	defer mu.Unlock()
-
-	// Check if the cluster exists
 	if _, exists := clusters[clusterName]; !exists {
+		mu.Unlock()
 		return "", fmt.Errorf("Cluster '%s' does not exist", clusterName)
 	}
+	delete(clusters, clusterName)
+	mu.Unlock()
 
-	// Delete the cluster using 'kind delete cluster' command
 	args := []string{"delete", "cluster", "--name", clusterName}
 	cmd := exec.Command("kind", args...)
 	cmd.Stdout = os.Stdout
@@ -63,9 +58,6 @@ func deleteCluster(clusterName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Error deleting cluster '%s': %v", clusterName, err)
 	}
-
-	// Remove the cluster from the internal data structure
-	delete(clusters, clusterName)
 
 	return fmt.Sprintf("Cluster '%s' deleted successfully", clusterName), nil
 }
@@ -116,7 +108,6 @@ func (c *Cluster) Put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create the cluster now and insert into the database...
 	consoleLog, err := createCluster(clusterName, args.Node)
 	if err != nil {
 		abort(w, 500, err.Error())
