@@ -1,4 +1,4 @@
-module api
+module emcluster-api
 
 go 1.21.6
 
